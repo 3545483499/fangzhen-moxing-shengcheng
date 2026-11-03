@@ -79,7 +79,7 @@ class AppConfig:
     # 分类子文件夹
     category: str = "UserImported"
     # 冲突：skip | overwrite | rename
-    conflict_policy: str = "rename"
+    conflict_policy: str = "overwrite"
     backup_on_overwrite: bool = True
     auto_generate_asy: bool = True
     last_import_source: str = ""

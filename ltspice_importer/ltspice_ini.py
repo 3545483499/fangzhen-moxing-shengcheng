@@ -30,7 +30,6 @@ def _detect_encoding(raw: bytes) -> str:
         return "utf-16"
     if raw.startswith(b"\xef\xbb\xbf"):
         return "utf-8-sig"
-    # NUL-heavy → likely UTF-16 LE without clear BOM handling
     if b"\x00" in raw[:200]:
         return "utf-16"
     return "utf-8"
@@ -45,43 +44,55 @@ def _split_paths(value: str) -> list[str]:
     return parts
 
 
-def _merge_paths(existing: list[str], required: list[str]) -> list[str]:
-    """保留已有顺序，追加缺失项；顺带去掉明显错误的「把 sym 指到 sub」重复。"""
+def _uniq(xs: list[str]) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
-    for p in existing + required:
-        key = p.rstrip("/\\")
-        if key.lower() in seen:
-            continue
-        seen.add(key.lower())
-        out.append(p)
+    for x in xs:
+        k = x.rstrip("/\\").lower()
+        if k not in seen:
+            seen.add(k)
+            out.append(x)
+    return out
+
+
+def search_lib_roots(config: AppConfig) -> list[Path]:
+    """进入 Search Paths 的库根：主库 + 可选 userDate。
+
+    Application Support 副本只作镜像写入，不加入搜索路径，避免 F2 出现多套重复入口。
+    """
+    roots: list[Path] = [Path(config.primary_lib_root).expanduser()]
+    if config.also_write_userdate:
+        roots.append(Path(config.userdate_lib_root).expanduser())
+    return _uniq_paths(roots)
+
+
+def _uniq_paths(roots: list[Path]) -> list[Path]:
+    seen: set[str] = set()
+    out: list[Path] = []
+    for r in roots:
+        key = str(r.resolve()) if r.exists() else str(r)
+        if key not in seen:
+            seen.add(key)
+            out.append(r)
     return out
 
 
 def desired_search_paths(config: AppConfig) -> tuple[list[str], list[str]]:
-    """返回 (symbol_paths, library_paths)。必须含 sym 根与分类，以及 sub 根与分类。"""
+    """返回精简 (symbol_paths, library_paths)。
+
+    Symbol：仅 .../sym 父目录（F2 里出现一个 UserImported 文件夹，而不是把 .asy 摊到顶层）。
+    Library：.../sub 与 .../sub/<category>（ModelFile 短文件名可解析）。
+    """
     syms: list[str] = []
     libs: list[str] = []
-    for root in config.all_lib_roots():
+    for root in search_lib_roots(config):
         sym_root = root / config.sym_dir_name
         sub_root = root / config.sub_dir_name
         syms.append(str(sym_root))
         libs.append(str(sub_root))
         if config.category:
-            syms.append(str(sym_root / config.category))
             libs.append(str(sub_root / config.category))
-    # 去重保序
-    def uniq(xs: list[str]) -> list[str]:
-        seen: set[str] = set()
-        out: list[str] = []
-        for x in xs:
-            k = x.rstrip("/\\").lower()
-            if k not in seen:
-                seen.add(k)
-                out.append(x)
-        return out
-
-    return uniq(syms), uniq(libs)
+    return _uniq(syms), _uniq(libs)
 
 
 def update_ltspice_ini(
@@ -90,11 +101,11 @@ def update_ltspice_ini(
     ini_path: Path | None = None,
     dry_run: bool = False,
 ) -> IniFixReport:
-    """备份并更新 SymbolSearchPath / LibrarySearchPath。
+    """备份并用精简列表**替换**（非追加）所有 SymbolSearchPath / LibrarySearchPath。
 
-    - SymbolSearchPath 必须指向 .../sym 与 .../sym/<category>
-    - LibrarySearchPath 必须指向 .../sub 与 .../sub/<category>
-    绝不把 SymbolSearchPath 指到 sub。
+    - SymbolSearchPath → .../sym（父目录；勿把 UserImported 平铺进顶层）
+    - LibrarySearchPath → .../sub 与 .../sub/<category>
+    - 更新文件中每一处同名键（ini 可能有重复 [Options] 段）
     """
     path = Path(ini_path or config.ltspice_ini_path or DEFAULT_LTSPICE_INI).expanduser()
     report = IniFixReport(ini_path=str(path))
@@ -111,7 +122,7 @@ def update_ltspice_ini(
     text = raw.decode(enc)
 
     lines = text.splitlines(keepends=True)
-    # 统一用 \n 处理逻辑，写回时尽量保留原换行
+
     def strip_nl(s: str) -> tuple[str, str]:
         if s.endswith("\r\n"):
             return s[:-2], "\r\n"
@@ -121,7 +132,8 @@ def update_ltspice_ini(
             return s[:-1], "\r"
         return s, "\n"
 
-    sym_idx = lib_idx = None
+    sym_idxs: list[int] = []
+    lib_idxs: list[int] = []
     cur_sym: list[str] = []
     cur_lib: list[str] = []
     for i, line in enumerate(lines):
@@ -129,40 +141,46 @@ def update_ltspice_ini(
         if body.startswith("SymbolSearchPath=") and not body.startswith(
             "SymbolSearchPathDisabled"
         ):
-            sym_idx = i
+            sym_idxs.append(i)
             cur_sym = _split_paths(body.split("=", 1)[1])
         elif body.startswith("LibrarySearchPath=") and not body.startswith(
             "LibrarySearchPathDisabled"
         ):
-            lib_idx = i
+            lib_idxs.append(i)
             cur_lib = _split_paths(body.split("=", 1)[1])
 
-    new_sym = _merge_paths(cur_sym, want_sym)
-    new_lib = _merge_paths(cur_lib, want_lib)
-
-    # 纠错：若 Symbol 路径误指到 /sub（且不是名字里碰巧含 sub 的 sym），尽量剔除明显错误项
-    fixed_sym: list[str] = []
-    for p in new_sym:
-        norm = p.replace("\\", "/").lower()
-        if norm.rstrip("/").endswith("/sub") or "/sub/" in norm and "/sym" not in norm:
-            # 误把 sub 写进 SymbolSearchPath —— 跳过该错误项
-            report.messages.append(f"已从 SymbolSearchPath 移除错误的 sub 路径: {p}")
-            continue
-        fixed_sym.append(p)
-    # 确保 want_sym 仍在
-    new_sym = _merge_paths(fixed_sym, want_sym)
-
-    changed = new_sym != cur_sym or new_lib != cur_lib or sym_idx is None or lib_idx is None
+    # 直接替换为精简目标，不再无限 merge 旧垃圾路径
+    new_sym = list(want_sym)
+    new_lib = list(want_lib)
     report.symbol_paths = new_sym
     report.library_paths = new_lib
+
+    changed = (
+        new_sym != cur_sym
+        or new_lib != cur_lib
+        or not sym_idxs
+        or not lib_idxs
+        or len(sym_idxs) > 1
+        or len(lib_idxs) > 1
+    )
+    # 若多处键值不一致也算需要统一
+    for idx in sym_idxs:
+        body, _ = strip_nl(lines[idx])
+        if _split_paths(body.split("=", 1)[1]) != new_sym:
+            changed = True
+    for idx in lib_idxs:
+        body, _ = strip_nl(lines[idx])
+        if _split_paths(body.split("=", 1)[1]) != new_lib:
+            changed = True
+
     report.changed = changed
 
     if not changed:
-        report.messages.append("LTspice.ini 搜索路径已正确，无需修改。")
+        report.messages.append("LTspice.ini 搜索路径已精简且正确，无需修改。")
         return report
 
     if dry_run:
-        report.messages.append("dry-run：将更新 SymbolSearchPath / LibrarySearchPath。")
+        report.messages.append("dry-run：将替换 SymbolSearchPath / LibrarySearchPath 为精简列表。")
         return report
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -171,10 +189,6 @@ def update_ltspice_ini(
     report.backup_path = str(backup)
     report.messages.append(f"已备份 ini → {backup}")
 
-    sym_line = "SymbolSearchPath=" + ";".join(new_sym)
-    lib_line = "LibrarySearchPath=" + ";".join(new_lib)
-
-    # 重建行（保留原换行符风格）
     sample_nl = "\n"
     for line in lines:
         _, nl = strip_nl(line)
@@ -182,36 +196,44 @@ def update_ltspice_ini(
             sample_nl = nl
             break
 
-    if sym_idx is not None:
-        lines[sym_idx] = sym_line + sample_nl
-    else:
-        # 插在 Options 段较前位置
+    sym_line = "SymbolSearchPath=" + ";".join(new_sym)
+    lib_line = "LibrarySearchPath=" + ";".join(new_lib)
+
+    for idx in sym_idxs:
+        lines[idx] = sym_line + sample_nl
+    for idx in lib_idxs:
+        lines[idx] = lib_line + sample_nl
+
+    if not sym_idxs:
         lines.append(sym_line + sample_nl)
         report.messages.append("原 ini 无 SymbolSearchPath，已追加。")
-
-    if lib_idx is not None:
-        lines[lib_idx] = lib_line + sample_nl
-    else:
+    if not lib_idxs:
         lines.append(lib_line + sample_nl)
         report.messages.append("原 ini 无 LibrarySearchPath，已追加。")
 
-    # 确保 Disabled=false
     def ensure_flag(name: str, value: str = "false") -> None:
         nonlocal lines
         key = f"{name}="
+        found = False
         for i, line in enumerate(lines):
             body, nl = strip_nl(line)
             if body.startswith(key):
                 lines[i] = f"{name}={value}" + nl
-                return
-        lines.append(f"{name}={value}" + sample_nl)
+                found = True
+        if not found:
+            lines.append(f"{name}={value}" + sample_nl)
 
     ensure_flag("SymbolSearchPathDisabled", "false")
     ensure_flag("LibrarySearchPathDisabled", "false")
 
-    new_text = "".join(lines)
-    path.write_bytes(new_text.encode(enc))
-    report.messages.append("已更新 SymbolSearchPath（sym）与 LibrarySearchPath（sub）。")
+    path.write_bytes("".join(lines).encode(enc))
+    report.messages.append(
+        "已替换为精简搜索路径：Symbol→sym 父目录；Library→sub + UserImported。"
+    )
+    if len(sym_idxs) > 1 or len(lib_idxs) > 1:
+        report.messages.append(
+            f"已同步 ini 内多处键（Symbol×{len(sym_idxs) or 1}, Library×{len(lib_idxs) or 1}）。"
+        )
     return report
 
 

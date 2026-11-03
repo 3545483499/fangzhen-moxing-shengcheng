@@ -112,8 +112,8 @@ class App(tk.Tk):
         opt_row = ttk.Frame(frm_opt)
         opt_row.pack(fill="x", padx=6, pady=4)
         ttk.Label(opt_row, text="重名策略:").pack(side="left")
-        self.var_conflict = tk.StringVar(value="rename")
-        for text, val in (("重命名", "rename"), ("跳过", "skip"), ("覆盖并备份", "overwrite")):
+        self.var_conflict = tk.StringVar(value="overwrite")
+        for text, val in (("覆盖并备份", "overwrite"), ("跳过", "skip"), ("重命名(不推荐)", "rename")):
             ttk.Radiobutton(opt_row, text=text, value=val, variable=self.var_conflict).pack(
                 side="left", padx=6
             )

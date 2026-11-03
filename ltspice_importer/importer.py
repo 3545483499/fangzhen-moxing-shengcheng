@@ -148,8 +148,8 @@ def _usage_checklist(config: AppConfig, report: ImportReport) -> None:
             "在原理图按 F2 → 打开元件库，搜索 UserImported / 器件名（如 PESD、OPAx333）。",
             f"或进入分类文件夹: [{config.category or '根'}]",
             "Control Panel → Sym. & Lib. Search Paths：",
-            "  • Symbol search path 必须包含 .../sym 与 .../sym/UserImported（不能只写 sub）",
-            "  • Library search path 必须包含 .../sub 与 .../sub/UserImported",
+            "  • Symbol search path：.../sym（父目录即可，F2 进入 UserImported）",
+            "  • Library search path：.../sub 与 .../sub/UserImported",
             "也可放置 SPICE Directive：.lib <模型文件名>",
         ]
     )
@@ -209,7 +209,7 @@ class Importer:
 
             policy: ConflictPolicy = self.config.conflict_policy  # type: ignore[assignment]
             if policy not in ("skip", "overwrite", "rename"):
-                policy = "rename"
+                policy = "overwrite"
 
             targets_sub = self.config.all_sub_dirs()
             targets_sym = self.config.all_sym_dirs()
@@ -310,11 +310,11 @@ class Importer:
                         # 无 .asy：按主 SUBCKT 或首个 MODEL 生成
                         if pr.subckts:
                             main = pr.subckts[0]
-                            content = generate_subckt_asy(main, final.name, filename=mp.name)
+                            content = generate_subckt_asy(main, mp.name, filename=mp.name)
                             asy_name = f"{main.name}.asy"
                         else:
                             main_m = pr.models[0]
-                            content = generate_model_asy(main_m, final.name)
+                            content = generate_model_asy(main_m, mp.name)
                             asy_name = f"{main_m.name}.asy"
                         for sym_root in targets_sym:
                             adest = sym_root / asy_name

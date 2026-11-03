@@ -16,7 +16,7 @@ Offline desktop utility that imports vendor or custom SPICE models (`.lib` / `.s
 - 拖入单个模型文件（`.lib` / `.sub` / `.cir` / `.mod`）或整包（文件夹 / ZIP，可含 `.asy`）
 - 解析 `.SUBCKT` / `.MODEL`，写入本地 `sub/` 与 `sym/`
 - 无符号时按器件类型自动生成通俗原理图符号（二极管、运放三角、MOS/三极管、阻容感、TVS 等）
-- 重名策略：重命名 / 跳过 / 覆盖并备份
+- 重名策略：默认 **覆盖并备份**（避免生成 `*_importedN` 垃圾副本）；也可跳过 / 重命名
 - 图形界面 + 命令行；完全离线，仅标准库（tkinter）
 
 ## 快速开始（macOS）
@@ -76,8 +76,9 @@ cp config.example.json config.json
 1. **完全退出并重新打开 LTspice**（否则 F2 可能仍是旧缓存）。
 2. 原理图按 **F2**，搜索 `UserImported`、`PESD`、`OPAx333` 等，或进入 `UserImported` 文件夹。
 3. 若仍找不到：Control Panel → **Sym. & Lib. Search Paths**
-   - **Symbol search path** 必须包含 `.../sym` 与 `.../sym/UserImported`（**不要只写 sub**）
-   - **Library search path** 必须包含 `.../sub` 与 `.../sub/UserImported`
+   - **Symbol search path** 指向 `.../sym` 父目录即可（F2 里进入 `UserImported`；不要把 `UserImported` 单独加进 Symbol 路径，否则符号会摊到顶层）
+   - **Library search path** 包含 `.../sub` 与 `.../sub/UserImported`
+   - 可用 `python3 main.py fix-ini` 写成精简路径（替换而非无限追加）
 4. 工具导入成功后会自动备份并修正瓶内 `LTspice.ini` 的上述路径。也可手动：
 
 ```bash

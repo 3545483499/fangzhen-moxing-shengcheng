@@ -9,7 +9,7 @@
   "sub_dir_name": "sub",
   "sym_dir_name": "sym",
   "category": "UserImported",
-  "conflict_policy": "rename",
+  "conflict_policy": "overwrite",
   "backup_on_overwrite": true,
   "auto_generate_asy": true,
   "last_import_source": ""
