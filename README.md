@@ -55,20 +55,34 @@ python3 main.py import /path/to/model.lib --category UserImported --dry-run
 python3 main.py import /path/to/package.zip --category UserImported
 ```
 
-## 默认库目录
+## 默认库目录（LTspice 24 / 瓶）
 
-| 目标 | 路径 |
-|------|------|
-| 主库（默认） | `~/Documents/10LTspice/userDate` → `sub/` / `sym/` |
-| 可选 | `~/Library/Application Support/LTspice/lib` |
+| 目标 | 路径 | 说明 |
+|------|------|------|
+| **主库（默认写入）** | `~/Library/Application Support/LTspice/Bottles/ltspice/drive_c/users/crossover/AppData/Local/LTspice/lib` | LTspice 24 实际读取的 Local 库 |
+| 同时写入 | `~/Documents/10LTspice/userDate` | 文档区副本 |
+| 同时写入 | `~/Library/Application Support/LTspice/lib` | App Support 库 |
 
-默认分类：`UserImported`。本地路径写在 `config.json`（不进 Git）；可复制：
+默认分类：`UserImported`（即 `sub/UserImported`、`sym/UserImported`）。
+
+本地路径写在 `config.json`（不进 Git）：
 
 ```bash
 cp config.example.json config.json
 ```
 
-导入后在 LTspice 按 **F2** 选择 `UserImported`；若看不到，请在 Control Panel → Sym. & Lib. Search Paths 中加入上述 `sym` / `sub`。
+### 导入后如何在 LTspice 看到元件
+
+1. **完全退出并重新打开 LTspice**（否则 F2 可能仍是旧缓存）。
+2. 原理图按 **F2**，搜索 `UserImported`、`PESD`、`OPAx333` 等，或进入 `UserImported` 文件夹。
+3. 若仍找不到：Control Panel → **Sym. & Lib. Search Paths**
+   - **Symbol search path** 必须包含 `.../sym` 与 `.../sym/UserImported`（**不要只写 sub**）
+   - **Library search path** 必须包含 `.../sub` 与 `.../sub/UserImported`
+4. 工具导入成功后会自动备份并修正瓶内 `LTspice.ini` 的上述路径。也可手动：
+
+```bash
+python3 main.py fix-ini
+```
 
 ## 项目结构
 

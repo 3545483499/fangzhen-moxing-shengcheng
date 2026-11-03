@@ -10,20 +10,22 @@ from tkinter import filedialog, messagebox, ttk
 from . import __version__
 from .config import (
     DEFAULT_APP_SUPPORT_LIB,
+    DEFAULT_BOTTLE_LIB,
     DEFAULT_USER_LIB,
     detect_targets,
     load_config,
     save_config,
 )
 from .importer import Importer
+from .ltspice_ini import post_import_fix
 
 
 class App(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
-        self.title(f"LTspice 模型导入工具  v{__version__}")
-        self.geometry("920x680")
-        self.minsize(760, 560)
+        self.title(f"仿真模型生成  v{__version__}")
+        self.geometry("960x720")
+        self.minsize(780, 600)
 
         self.config_data = load_config()
         self.source_paths: list[Path] = []
@@ -59,7 +61,8 @@ class App(tk.Tk):
             side="left", fill="x", expand=True, padx=4
         )
         ttk.Button(row1, text="浏览…", command=self._browse_primary).pack(side="left")
-        ttk.Button(row1, text="默认 userDate", command=self._use_userdate).pack(side="left", padx=2)
+        ttk.Button(row1, text="瓶内主库", command=self._use_bottle).pack(side="left", padx=2)
+        ttk.Button(row1, text="userDate", command=self._use_userdate).pack(side="left", padx=2)
 
         row2 = ttk.Frame(frm_tgt)
         row2.pack(fill="x", padx=6, pady=2)
@@ -70,20 +73,38 @@ class App(tk.Tk):
 
         row3 = ttk.Frame(frm_tgt)
         row3.pack(fill="x", padx=6, pady=2)
-        self.var_also_app = tk.BooleanVar()
+        self.var_also_userdate = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             row3,
-            text="同时写入 Application Support/LTspice/lib（覆盖前自动备份）",
-            variable=self.var_also_app,
+            text="同时写入 Documents/10LTspice/userDate",
+            variable=self.var_also_userdate,
         ).pack(side="left")
 
         row3b = ttk.Frame(frm_tgt)
         row3b.pack(fill="x", padx=6, pady=2)
-        ttk.Label(row3b, text="App Support 路径:").pack(side="left")
+        self.var_also_app = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            row3b,
+            text="同时写入 Application Support/LTspice/lib（覆盖前自动备份）",
+            variable=self.var_also_app,
+        ).pack(side="left")
+
+        row3c = ttk.Frame(frm_tgt)
+        row3c.pack(fill="x", padx=6, pady=2)
+        ttk.Label(row3c, text="App Support 路径:").pack(side="left")
         self.var_app_support = tk.StringVar()
-        ttk.Entry(row3b, textvariable=self.var_app_support).pack(
+        ttk.Entry(row3c, textvariable=self.var_app_support).pack(
             side="left", fill="x", expand=True, padx=4
         )
+
+        row3d = ttk.Frame(frm_tgt)
+        row3d.pack(fill="x", padx=6, pady=2)
+        self.var_fix_ini = tk.BooleanVar(value=True)
+        ttk.Checkbutton(
+            row3d,
+            text="导入后自动修正 LTspice.ini（Symbol→sym，Library→sub；先备份）",
+            variable=self.var_fix_ini,
+        ).pack(side="left")
 
         frm_opt = ttk.LabelFrame(self, text="3. 选项")
         frm_opt.pack(fill="x", **pad)
@@ -100,7 +121,7 @@ class App(tk.Tk):
         self.var_auto_asy = tk.BooleanVar(value=True)
         ttk.Checkbutton(
             frm_opt,
-            text="若无 .asy，根据 .SUBCKT / .MODEL 自动生成简易符号",
+            text="若无 .asy，根据 .SUBCKT / .MODEL 自动生成通俗符号",
             variable=self.var_auto_asy,
         ).pack(anchor="w", padx=6)
 
@@ -113,13 +134,16 @@ class App(tk.Tk):
 
         frm_det = ttk.LabelFrame(self, text="本机路径检测")
         frm_det.pack(fill="x", **pad)
-        self.txt_detect = tk.Text(frm_det, height=4, wrap="word")
+        self.txt_detect = tk.Text(frm_det, height=5, wrap="word")
         self.txt_detect.pack(fill="x", padx=6, pady=4)
 
         frm_act = ttk.Frame(self)
         frm_act.pack(fill="x", **pad)
         ttk.Button(frm_act, text="开始导入", command=self._run_import).pack(side="left", padx=4)
         ttk.Button(frm_act, text="保存设置", command=self._save_settings).pack(side="left", padx=4)
+        ttk.Button(frm_act, text="仅修复 ini 路径", command=self._fix_ini_only).pack(
+            side="left", padx=4
+        )
         ttk.Button(frm_act, text="打开主库文件夹", command=self._open_primary).pack(
             side="left", padx=4
         )
@@ -139,8 +163,10 @@ class App(tk.Tk):
         c = self.config_data
         self.var_primary.set(c.primary_lib_root)
         self.var_category.set(c.category)
+        self.var_also_userdate.set(getattr(c, "also_write_userdate", True))
         self.var_also_app.set(c.also_write_app_support)
         self.var_app_support.set(c.app_support_lib_root or str(DEFAULT_APP_SUPPORT_LIB))
+        self.var_fix_ini.set(getattr(c, "auto_fix_ini_paths", True))
         self.var_conflict.set(c.conflict_policy)
         self.var_auto_asy.set(c.auto_generate_asy)
 
@@ -148,10 +174,13 @@ class App(tk.Tk):
         c = self.config_data
         c.primary_lib_root = self.var_primary.get().strip()
         c.category = self.var_category.get().strip()
+        c.also_write_userdate = bool(self.var_also_userdate.get())
+        c.userdate_lib_root = str(DEFAULT_USER_LIB)
         c.also_write_app_support = bool(self.var_also_app.get())
         c.app_support_lib_root = self.var_app_support.get().strip() or str(
             DEFAULT_APP_SUPPORT_LIB
         )
+        c.auto_fix_ini_paths = bool(self.var_fix_ini.get())
         c.conflict_policy = self.var_conflict.get()
         c.auto_generate_asy = bool(self.var_auto_asy.get())
         c.backup_on_overwrite = True
@@ -209,6 +238,9 @@ class App(tk.Tk):
         if d:
             self.var_primary.set(d)
 
+    def _use_bottle(self) -> None:
+        self.var_primary.set(str(DEFAULT_BOTTLE_LIB))
+
     def _use_userdate(self) -> None:
         self.var_primary.set(str(DEFAULT_USER_LIB))
 
@@ -232,6 +264,19 @@ class App(tk.Tk):
             lines.append(f"[{mark}] {key}: {val['path']}")
         self.txt_detect.delete("1.0", "end")
         self.txt_detect.insert("1.0", "\n".join(lines))
+
+    def _fix_ini_only(self) -> None:
+        c = self._collect_config()
+        save_config(c)
+        self.config_data = c
+        report = post_import_fix(c, dry_run=False)
+        for msg in report.messages or []:
+            self._log(msg)
+        messagebox.showinfo(
+            "ini 修复",
+            "\n".join(report.messages or ["完成"])
+            + "\n\n请重启 LTspice 后再按 F2 搜索 UserImported / PESD / OPAx333。",
+        )
 
     def _run_import(self) -> None:
         if not self.source_paths:
@@ -259,10 +304,17 @@ class App(tk.Tk):
                     f"完成，但有 {len(report.errors)} 个错误，请查看日志。",
                 )
             else:
-                messagebox.showinfo(
-                    "完成",
-                    "演练完成。" if dry else "导入完成。请查看下方使用说明清单。",
+                tip = (
+                    "演练完成。"
+                    if dry
+                    else (
+                        "导入完成。\n\n"
+                        "请完全退出并重新打开 LTspice，\n"
+                        "然后 F2 搜索 UserImported / PESD / OPAx333。\n\n"
+                        "Symbol search path 必须包含 sym（不能只写 sub）。"
+                    )
                 )
+                messagebox.showinfo("完成", tip)
         except Exception as exc:  # noqa: BLE001 — GUI 顶层捕获
             self._log(f"异常: {exc}")
             messagebox.showerror("失败", str(exc))

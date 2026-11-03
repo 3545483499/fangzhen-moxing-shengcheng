@@ -1,7 +1,11 @@
 {
-  "primary_lib_root": "~/Documents/10LTspice/userDate",
-  "also_write_app_support": false,
+  "primary_lib_root": "~/Library/Application Support/LTspice/Bottles/ltspice/drive_c/users/crossover/AppData/Local/LTspice/lib",
+  "also_write_userdate": true,
+  "userdate_lib_root": "~/Documents/10LTspice/userDate",
+  "also_write_app_support": true,
   "app_support_lib_root": "~/Library/Application Support/LTspice/lib",
+  "auto_fix_ini_paths": true,
+  "ltspice_ini_path": "~/Library/Application Support/LTspice/Bottles/ltspice/drive_c/users/crossover/AppData/Roaming/LTspice.ini",
   "sub_dir_name": "sub",
   "sym_dir_name": "sym",
   "category": "UserImported",

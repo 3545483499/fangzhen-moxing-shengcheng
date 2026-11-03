@@ -51,6 +51,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="同时写入 ~/Library/Application Support/LTspice/lib",
     )
     p_imp.add_argument(
+        "--also-userdate",
+        action="store_true",
+        help="同时写入 ~/Documents/10LTspice/userDate",
+    )
+    p_imp.add_argument(
+        "--no-fix-ini",
+        action="store_true",
+        help="导入后不修改 LTspice.ini",
+    )
+    p_imp.add_argument(
         "--no-auto-asy",
         action="store_true",
         help="不自动生成 .asy",
@@ -70,6 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_parse.add_argument("paths", nargs="+", type=Path)
 
     sub.add_parser("detect", help="检测本机 LTspice 库路径")
+    sub.add_parser("fix-ini", help="备份并修正 LTspice.ini 的 Symbol/Library Search Paths")
     sub.add_parser("gui", help="启动图形界面")
 
     return p
@@ -85,6 +96,10 @@ def _apply_cli_to_config(args: argparse.Namespace):
         cfg.conflict_policy = args.conflict
     if getattr(args, "also_app_support", False):
         cfg.also_write_app_support = True
+    if getattr(args, "also_userdate", False):
+        cfg.also_write_userdate = True
+    if getattr(args, "no_fix_ini", False):
+        cfg.auto_fix_ini_paths = False
     if getattr(args, "no_auto_asy", False):
         cfg.auto_generate_asy = False
     return cfg
@@ -142,6 +157,24 @@ def cmd_detect(_: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_fix_ini(_: argparse.Namespace) -> int:
+    from .ltspice_ini import post_import_fix
+
+    cfg = load_config()
+    report = post_import_fix(cfg, dry_run=False)
+    for msg in report.messages or []:
+        print(msg)
+    if report.symbol_paths:
+        print("SymbolSearchPath=")
+        for pth in report.symbol_paths:
+            print(f"  {pth}")
+    if report.library_paths:
+        print("LibrarySearchPath=")
+        for pth in report.library_paths:
+            print(f"  {pth}")
+    return 0
+
+
 def cmd_gui(_: argparse.Namespace) -> int:
     from .gui import run_gui
 
@@ -166,6 +199,7 @@ def main(argv: list[str] | None = None) -> int:
         "import": cmd_import,
         "parse": cmd_parse,
         "detect": cmd_detect,
+        "fix-ini": cmd_fix_ini,
         "gui": cmd_gui,
     }
     return handlers[args.command](args)

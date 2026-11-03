@@ -140,25 +140,21 @@ def _match_symbol_for_model(model_path: Path, symbols: list[Path], parse: ParseR
 
 
 def _usage_checklist(config: AppConfig, report: ImportReport) -> None:
-    sub = config.primary_sub()
-    sym = config.primary_sym()
     report.checklist.extend(
         [
-            f"模型已放到: {sub}",
-            f"符号已放到: {sym}",
-            "在 LTspice 原理图中按 F2（或 Edit → Component）打开元件库。",
-            f"若使用分类目录，请在符号浏览器中进入 [{config.category or '根'}] 文件夹。",
-            "也可在原理图放置 SPICE Directive：.lib <模型文件名> 或 .include <路径>。",
-            "若 LTspice 找不到符号：Control Panel → Sym. & Lib. Search Paths，"
-            f"将「Symbol search path」加入 {config.primary_lib_root}/{config.sym_dir_name}，"
-            f"将「Library search path」加入 {config.primary_lib_root}/{config.sub_dir_name}。",
-            "改库后如未刷新，可重启 LTspice 或重新打开原理图。",
+            "【重要】导入后请完全退出并重新打开 LTspice，否则 F2 可能看不到新符号。",
+            f"主库（瓶内）模型: {config.primary_sub()}",
+            f"主库（瓶内）符号: {config.primary_sym()}",
+            "在原理图按 F2 → 打开元件库，搜索 UserImported / 器件名（如 PESD、OPAx333）。",
+            f"或进入分类文件夹: [{config.category or '根'}]",
+            "Control Panel → Sym. & Lib. Search Paths：",
+            "  • Symbol search path 必须包含 .../sym 与 .../sym/UserImported（不能只写 sub）",
+            "  • Library search path 必须包含 .../sub 与 .../sub/UserImported",
+            "也可放置 SPICE Directive：.lib <模型文件名>",
         ]
     )
-    if config.also_write_app_support:
-        report.checklist.append(
-            f"同时已写入 Application Support 库: {config.app_support_lib_root}"
-        )
+    for root in config.all_lib_roots():
+        report.checklist.append(f"已写入库根: {root}")
 
 
 class Importer:
@@ -215,11 +211,8 @@ class Importer:
             if policy not in ("skip", "overwrite", "rename"):
                 policy = "rename"
 
-            targets_sub = [self.config.primary_sub()]
-            targets_sym = [self.config.primary_sym()]
-            if self.config.also_write_app_support:
-                targets_sub.append(self.config.app_support_sub())
-                targets_sym.append(self.config.app_support_sym())
+            targets_sub = self.config.all_sub_dirs()
+            targets_sym = self.config.all_sym_dirs()
 
             # 先解析全部模型
             parses: dict[Path, ParseResult] = {}
@@ -379,6 +372,21 @@ class Importer:
                         report.errors.append(str(exc))
 
             _usage_checklist(self.config, report)
+
+            # 导入成功后：修正 LTspice.ini 搜索路径（Symbol→sym，Library→sub）
+            if not dry_run and not report.errors:
+                try:
+                    from .ltspice_ini import post_import_fix
+
+                    ini_report = post_import_fix(self.config, dry_run=False)
+                    for msg in ini_report.messages or []:
+                        self._log(msg)
+                        report.checklist.append(msg)
+                    if ini_report.backup_path:
+                        report.checklist.append(f"ini 备份: {ini_report.backup_path}")
+                except Exception as exc:  # noqa: BLE001
+                    report.errors.append(f"修正 LTspice.ini 失败: {exc}")
+                    self._log(f"修正 LTspice.ini 失败: {exc}")
         finally:
             for d in tmp_dirs:
                 shutil.rmtree(d, ignore_errors=True)
