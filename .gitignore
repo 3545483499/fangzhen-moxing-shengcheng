@@ -1,0 +1,37 @@
+# Local machine config (absolute paths)
+config.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+.venv/
+env/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+
+# Build / packaging
+dist/
+*.app/
+assets/AppIcon.iconset/
+
+# Backups created on overwrite
+*.bak_*
+*.bak
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*~

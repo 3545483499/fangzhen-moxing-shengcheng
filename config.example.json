@@ -1,0 +1,12 @@
+{
+  "primary_lib_root": "~/Documents/10LTspice/userDate",
+  "also_write_app_support": false,
+  "app_support_lib_root": "~/Library/Application Support/LTspice/lib",
+  "sub_dir_name": "sub",
+  "sym_dir_name": "sym",
+  "category": "UserImported",
+  "conflict_policy": "rename",
+  "backup_on_overwrite": true,
+  "auto_generate_asy": true,
+  "last_import_source": ""
+}
